@@ -3,6 +3,8 @@ import inspect
 import tools.google_slides_report as google_slides_report
 from tools.google_slides_report import (
     audit_placeholders,
+    build_funnel_stage_table_rows,
+    build_meta_top_ads_table_rows,
     build_slides_replacements,
     extract_placeholders_from_presentation,
     find_sheets_chart_object_ids,
@@ -55,6 +57,25 @@ def test_extract_placeholders_from_shapes_and_tables():
 
 def test_make_replace_all_text_requests_uses_exact_case_sensitive_tokens():
     requests = make_replace_all_text_requests({"{{CLIENT}}": "One Funded"})
+
+    assert requests == [
+        {
+            "replaceAllText": {
+                "containsText": {"text": "{{CLIENT}}", "matchCase": True},
+                "replaceText": "One Funded",
+            }
+        }
+    ]
+
+
+def test_make_replace_all_text_requests_skips_table_placeholders():
+    requests = make_replace_all_text_requests(
+        {
+            "{{CLIENT}}": "One Funded",
+            "{{META_TOP_10_ADS_TABLE}}": "{{META_TOP_10_ADS_TABLE}}",
+            "{{TOP_3_FUNNEL_ADS_TABLE}}": "{{TOP_3_FUNNEL_ADS_TABLE}}",
+        }
+    )
 
     assert requests == [
         {
@@ -214,6 +235,8 @@ def test_build_slides_replacements_contains_required_template_tokens():
     assert replacements["{{META_MOF_AD_NAME}}"] == "Meta MOF Winner | Source Link: MOF - Website Visitors"
     assert replacements["{{BING_BOF_AD_NAME}}"] == "Bing BOF Winner | Source Link: BOF - Branded - Bing"
     assert "Impressions |" in replacements["{{GOOGLE_TOF_NARRATIVE}}"]
+    assert replacements["{{META_TOP_10_ADS_TABLE}}"] == "{{META_TOP_10_ADS_TABLE}}"
+    assert replacements["{{TOP_3_FUNNEL_ADS_TABLE}}"] == "{{TOP_3_FUNNEL_ADS_TABLE}}"
 
     eur_replacements = build_slides_replacements(
         "One Funded",
@@ -227,6 +250,77 @@ def test_build_slides_replacements_contains_required_template_tokens():
     )
     assert eur_replacements["{{GOOGLE_TOF_REVENUE}}"] == "€1K"
     assert eur_replacements["{{SLIDE4_AD_COST}}"].startswith("€")
+
+
+def test_funnel_narrative_uses_aggregate_metrics_not_ai_top_ad_metrics():
+    kpis = {
+        "google": {"cost": 137635.21, "revenue": 307275.14, "sales": 820},
+        "meta": {},
+        "google_funnels": {
+            "TOF": {
+                "impressions": 42413,
+                "clicks": 1917,
+                "leads": 220,
+                "sales": 84,
+                "revenue": 24710.59,
+                "cost": 14505.60,
+                "cps": 172.69,
+                "roas": 1.70,
+            }
+        },
+        "meta_funnels": {},
+        "google_funnel_cards": {
+            "TOF": {
+                "source": "Top Google TOF ad",
+                "impressions": 2854,
+                "clicks": 150,
+                "leads": 4,
+                "sales": 19,
+                "revenue": 7440.45,
+                "cost": 1073.63,
+                "roas": 6.93,
+            }
+        },
+        "meta_funnel_cards": {},
+        "total_funnel_distribution": {},
+        "totals": {
+            "revenue": 307275.14,
+            "cost": 137635.21,
+            "sales": 820,
+            "roas": 2.23,
+            "cps": 167.85,
+            "l2s_pct": 33.01,
+            "cvr_pct": 1.15,
+            "aov": 374.73,
+        },
+    }
+    misleading_ai_narrative = (
+        "2,854 Impressions | 150 Clicks | 4 Leads | 19 Sales | $7,440.45 Ad Revenue\n"
+        "Distribution: 7.4% of Google TOF ad spend.\n"
+        "Top Performer: Top Google TOF ad reached a 6.93 ROAS.\n"
+        "Next Steps: Keep the winning ad controlled while validating attribution."
+    )
+
+    replacements = build_slides_replacements(
+        "Alpha Funded",
+        "August",
+        2026,
+        "July",
+        "September",
+        kpis,
+        {
+            "google_tof_narrative": misleading_ai_narrative,
+            "action_items": [],
+        },
+        {},
+    )
+
+    narrative = replacements["{{GOOGLE_TOF_NARRATIVE}}"]
+    assert "42.4K Impressions | 1.9K Clicks | 220 Leads | 84 Sales" in narrative
+    assert "$25K Ad Revenue | $15K Ad Spend | $173 CPS | 1.7 ROAS" in narrative
+    assert "Distribution: 10.54% ad spend, 8.04% ad revenue, and 10.24% of sales." in narrative
+    assert "2,854 Impressions" not in narrative
+    assert narrative.endswith("Next Steps: Keep the winning ad controlled while validating attribution.")
 
 
 def test_build_audit_replacements_contains_dynamic_template_tokens():
@@ -258,11 +352,59 @@ def test_build_audit_replacements_contains_dynamic_template_tokens():
         "{{GOOGLE_TOF_AD_NAME}}",
         "{{META_MOF_AD_NAME}}",
         "{{BING_BOF_AD_NAME}}",
+        "{{META_TOP_10_ADS_TABLE}}",
+        "{{TOP_3_FUNNEL_ADS_TABLE}}",
     }
 
     assert expected_tokens <= set(replacements)
     assert replacements["{{REPORT_MONTH}}"] == "March 2026"
     assert replacements["{{CLIENT}}"] == "One Funded"
+
+
+def test_build_meta_top_ads_table_rows_formats_expected_columns():
+    rows = build_meta_top_ads_table_rows(
+        {
+            "meta_top_ads_detailed": [
+                {
+                    "source": "Video - This is intentionally included in top Meta Ads",
+                    "cost": 12.34,
+                    "revenue": 123.45,
+                    "revenue_pct": 67.89,
+                    "sales": 3,
+                    "clicks": 45,
+                    "roas": 10,
+                    "cps": 4.11,
+                    "cvr_pct": 6.67,
+                    "leads": 9,
+                    "ctr_pct": 1.23,
+                }
+            ]
+        }
+    )
+
+    assert rows[0] == ["Ad Name", "Ad Spend", "Ad Revenue", "% of Ad Revenue", "Sales", "Clicks", "ROAS", "CPS", "CR", "Leads", "CTR"]
+    assert rows[1][0].startswith("Video - This is intentionally")
+    assert rows[1][1:] == ["$12", "$123", "67.9%", "3", "45", "10.00", "$4", "6.7%", "9", "1.2%"]
+    assert len(rows) == 11
+
+
+def test_build_funnel_stage_table_rows_formats_top_three():
+    rows = build_funnel_stage_table_rows(
+        {
+            "top_ads_by_funnel_stage": {
+                "TOF": [
+                    {"traffic_source": "google", "source": "Google TOF Winner", "revenue": 300, "roas": 3, "sales": 10, "cps": 30},
+                    {"traffic_source": "meta", "source": "Meta TOF Runner", "revenue": 200, "roas": 2, "sales": 5, "cps": 40},
+                ]
+            }
+        },
+        "TOF",
+    )
+
+    assert rows[0] == ["Rank", "Channel", "Ad Name", "Revenue", "ROAS", "Sales", "CPS"]
+    assert rows[1] == ["1", "google", "Google TOF Winner", "$300", "3.00", "10", "$30"]
+    assert rows[2] == ["2", "meta", "Meta TOF Runner", "$200", "2.00", "5", "$40"]
+    assert rows[3][1] == "N/A"
 
 
 def test_ad_name_placeholder_uses_source_link_when_ad_name_is_missing():

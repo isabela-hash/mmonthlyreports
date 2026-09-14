@@ -5,6 +5,10 @@ from typing import Any, Callable
 
 FUNNEL_STAGES = ("TOF", "MOF", "BOF")
 PLATFORM_TOKENS = {"google": "GOOGLE", "meta": "META", "bing": "BING"}
+TABLE_PLACEHOLDER_TOKENS = {
+    "{{META_TOP_10_ADS_TABLE}}",
+    "{{TOP_3_FUNNEL_ADS_TABLE}}",
+}
 
 REQUIRED_TEMPLATE_TOKENS = {
     "{{CLIENT}}",
@@ -47,7 +51,7 @@ REQUIRED_TEMPLATE_TOKENS = {
     "{{ACTION_ITEM_3}}",
     "{{ACTION_ITEM_4}}",
     "{{ACTION_ITEM_5}}",
-}
+} | TABLE_PLACEHOLDER_TOKENS
 
 
 def currency_symbol(currency: str | None = None) -> str:
@@ -306,6 +310,15 @@ def build_deterministic_funnel_narratives(kpis: dict, currency: str | None = Non
     return narratives
 
 
+def _extract_funnel_next_steps(ai_narrative: Any) -> str | None:
+    """Keep AI strategy while rejecting AI-generated metric lines."""
+    for line in str(ai_narrative or "").splitlines():
+        normalized = line.strip()
+        if normalized.lower().startswith("next steps:"):
+            return normalized
+    return None
+
+
 def build_audit_replacements(
     client: str,
     month: str,
@@ -441,6 +454,8 @@ def build_replacements(
     action_items = insights.get("action_items", [])
 
     replacements = {
+        "{{META_TOP_10_ADS_TABLE}}": "{{META_TOP_10_ADS_TABLE}}",
+        "{{TOP_3_FUNNEL_ADS_TABLE}}": "{{TOP_3_FUNNEL_ADS_TABLE}}",
         "{{MONTH}}": month,
         "{{YEAR}}": str(year),
         "{{REPORT_MONTH}}": f"{month} {year}",
@@ -478,13 +493,21 @@ def build_replacements(
         "{{PM_NARRATIVE}}": insights.get("performance_manager_narrative", ""),
     }
 
-    deterministic_narratives = build_deterministic_funnel_narratives(kpis, currency)
     for platform_key, token_prefix in PLATFORM_TOKENS.items():
+        platform_total = kpis.get(platform_key, {})
+        funnels = kpis.get(f"{platform_key}_funnels", {})
+        top_ads = kpis.get(f"{platform_key}_funnel_cards", {})
+        platform_name = token_prefix.title() if token_prefix != "GOOGLE" else "Google"
         for stage in FUNNEL_STAGES:
             insight_key = f"{platform_key}_{stage.lower()}_narrative"
-            replacements[f"{{{{{token_prefix}_{stage}_NARRATIVE}}}}"] = insights.get(
-                insight_key,
-                deterministic_narratives.get(insight_key, ""),
+            replacements[f"{{{{{token_prefix}_{stage}_NARRATIVE}}}}"] = build_funnel_narrative(
+                platform_name,
+                stage,
+                platform_total,
+                funnels.get(stage, {}),
+                top_ads.get(stage, {}),
+                currency,
+                next_steps=_extract_funnel_next_steps(insights.get(insight_key, "")),
             )
 
     for index in range(5):

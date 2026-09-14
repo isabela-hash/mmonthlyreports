@@ -1,6 +1,7 @@
 import argparse
 import json
 
+import pandas as pd
 import pytest
 
 from tools import run_google_slides_report as runner
@@ -208,6 +209,7 @@ def test_run_report_uses_prev_year_for_previous_month(monkeypatch):
     )
     monkeypatch.setattr(runner, "copy_presentation", lambda *args, **kwargs: {"id": "deck-1", "webViewLink": "https://deck"})
     monkeypatch.setattr(runner, "replace_placeholders", lambda *args, **kwargs: 1)
+    monkeypatch.setattr(runner, "insert_creative_metric_tables", lambda *args, **kwargs: 0)
     monkeypatch.setattr(runner, "refresh_linked_sheets_charts", lambda *args, **kwargs: 0)
     monkeypatch.setattr(runner, "append_run_log", lambda *args, **kwargs: None)
 
@@ -260,6 +262,7 @@ def test_run_report_extracts_output_folder_id_from_url(monkeypatch):
 
     monkeypatch.setattr(runner, "copy_presentation", fake_copy_presentation)
     monkeypatch.setattr(runner, "replace_placeholders", lambda *args, **kwargs: 1)
+    monkeypatch.setattr(runner, "insert_creative_metric_tables", lambda *args, **kwargs: 0)
     monkeypatch.setattr(runner, "refresh_linked_sheets_charts", lambda *args, **kwargs: 0)
     monkeypatch.setattr(runner, "append_run_log", lambda *args, **kwargs: None)
 
@@ -272,3 +275,49 @@ def test_run_report_extracts_output_folder_id_from_url(monkeypatch):
     )
 
     assert captured["folder_id"] == "folder-123"
+
+
+def test_run_report_allows_first_month_zero_previous_baseline(monkeypatch):
+    monkeypatch.setattr(runner, "build_workspace_services", lambda: {"slides": object(), "sheets": object(), "drive": object()})
+    monkeypatch.setattr(runner, "extract_file_id", lambda value: value)
+    current = pd.DataFrame([{"Client": "One Funded", "Month": "March", "Year": 2026}])
+    previous = current.iloc[0:0].copy()
+
+    def fake_load_report_sheet(_service, _spreadsheet_id, _sheet_name, _client, month=None, **_kwargs):
+        return current if month == "March" else previous
+
+    build_lengths = []
+
+    def fake_build_full_kpi_report(campaigns, ads):
+        build_lengths.append((len(campaigns), len(ads)))
+        return _sample_kpis()
+
+    monkeypatch.setattr(runner, "load_report_sheet", fake_load_report_sheet)
+    monkeypatch.setattr(runner, "validate_or_raise", lambda df: {"checkpoint_1_passed": True})
+    monkeypatch.setattr(runner, "build_full_kpi_report", fake_build_full_kpi_report)
+    monkeypatch.setattr(runner, "read_manual_inputs", lambda *args, **kwargs: {})
+    monkeypatch.setattr(runner, "write_kpi_output", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner, "generate_insights_with_provider", lambda *args, **kwargs: (_sample_insights(), "deterministic"))
+    monkeypatch.setattr(runner, "build_slides_replacements", lambda *args, **kwargs: {"{{CLIENT}}": "One Funded"})
+    monkeypatch.setattr(runner, "read_placeholders", lambda *args, **kwargs: {"{{CLIENT}}"})
+    monkeypatch.setattr(
+        runner,
+        "audit_placeholders",
+        lambda *args, **kwargs: {"template_placeholders": ["{{CLIENT}}"], "missing_values": [], "unused_values": []},
+    )
+    monkeypatch.setattr(runner, "copy_presentation", lambda *args, **kwargs: {"id": "deck-1", "webViewLink": "https://deck"})
+    monkeypatch.setattr(runner, "replace_placeholders", lambda *args, **kwargs: 1)
+    monkeypatch.setattr(runner, "insert_creative_metric_tables", lambda *args, **kwargs: 0)
+    monkeypatch.setattr(runner, "refresh_linked_sheets_charts", lambda *args, **kwargs: 0)
+    monkeypatch.setattr(runner, "append_run_log", lambda *args, **kwargs: None)
+
+    summary = runner.run_report(
+        _sample_args(
+            spreadsheet="sheet-id",
+            allow_first_month_baseline=True,
+        ),
+        services={"slides": object(), "sheets": object(), "drive": object()},
+    )
+
+    assert summary["first_month_baseline"] is True
+    assert build_lengths[-1] == (0, 0)

@@ -17,6 +17,7 @@ except ImportError:  # pragma: no cover - exercised when dependency is not insta
 ANTHROPIC_DEFAULT_MODEL = os.environ.get("ANTHROPIC_INSIGHTS_MODEL", "claude-sonnet-4-6")
 ANTHROPIC_MAX_TOKENS = int(os.environ.get("ANTHROPIC_INSIGHTS_MAX_TOKENS", "8192"))
 OPENAI_DEFAULT_MODEL = os.environ.get("OPENAI_INSIGHTS_MODEL", "gpt-5.4-mini")
+INSIGHT_PROVIDER_TIMEOUT_SECONDS = float(os.environ.get("REPORT_INSIGHTS_TIMEOUT_SECONDS", "90"))
 INSIGHT_PROVIDER_CHOICES = {"deterministic", "anthropic", "openai", "auto"}
 
 
@@ -164,7 +165,7 @@ def generate_insights(
     api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     if not api_key:
         raise InsightProviderError("ANTHROPIC_API_KEY is required to use the Anthropic insight provider.")
-    client_sdk = anthropic.Anthropic(api_key=api_key)
+    client_sdk = anthropic.Anthropic(api_key=api_key, timeout=INSIGHT_PROVIDER_TIMEOUT_SECONDS)
 
     prompt = build_prompt(
         client, month, year, prev_month, prev_year,
@@ -224,7 +225,7 @@ def generate_openai_insights(
         "You are a senior performance marketing analyst specialized in paid media for prop firms. "
         "Respond with valid JSON only. No markdown code blocks and no preamble."
     )
-    client_sdk = OpenAI(api_key=api_key)
+    client_sdk = OpenAI(api_key=api_key, timeout=INSIGHT_PROVIDER_TIMEOUT_SECONDS)
     response = client_sdk.responses.create(
         model=OPENAI_DEFAULT_MODEL,
         input=f"{instructions}\n\n{prompt}",

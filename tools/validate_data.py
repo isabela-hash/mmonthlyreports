@@ -9,12 +9,24 @@ REQUIRED_COLUMNS = [
 
 SUPPORTED_TRAFFIC_SOURCES = {
     "google": "google",
+    "google v2": "google",
     "meta": "meta",
     "bing": "bing",
     "bing ads": "bing",
     "microsoft": "bing",
     "microsoft ads": "bing",
 }
+
+
+def canonicalize_traffic_sources(df: pd.DataFrame) -> pd.DataFrame:
+    """Return a calculation copy with recognized source aliases canonicalized."""
+    normalized = df.copy()
+    if not hasattr(normalized, "columns") or "Traffic Source" not in normalized.columns:
+        return normalized
+    labels = normalized["Traffic Source"].astype(str).str.strip().str.lower()
+    canonical = labels.map(SUPPORTED_TRAFFIC_SOURCES)
+    normalized["Traffic Source"] = canonical.fillna(labels)
+    return normalized
 
 def load_sheet(path: Union[str, Path], sheet_name: str, client: str) -> pd.DataFrame:
     """

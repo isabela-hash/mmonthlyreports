@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import pickle
+import json
 from pathlib import Path
 from typing import Iterable
 
@@ -41,6 +42,7 @@ def get_workspace_credentials(
     """
     scopes = list(scopes or WORKSPACE_SCOPES)
     service_account_file = os.environ.get("GOOGLE_SERVICE_ACCOUNT_FILE", "").strip()
+    service_account_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
 
     if service_account_file:
         service_account_path = Path(service_account_file)
@@ -52,6 +54,11 @@ def get_workspace_credentials(
             )
         return service_account.Credentials.from_service_account_file(
             str(service_account_path),
+            scopes=scopes,
+        )
+    if service_account_json:
+        return service_account.Credentials.from_service_account_info(
+            json.loads(service_account_json),
             scopes=scopes,
         )
 

@@ -35,6 +35,22 @@ def test_load_control_sheet_clients_requires_columns(monkeypatch):
         load_control_sheet_clients(object(), "control-sheet")
 
 
+def test_load_control_sheet_clients_reads_optional_currency_settings(monkeypatch):
+    monkeypatch.setattr(
+        "tools.control_sheet.read_sheet_values",
+        lambda *args, **kwargs: [
+            ["active", "client_name", "client_key", "spreadsheet_url_or_id", "template_presentation_url_or_id", "output_folder_id", "source_currency", "report_currency", "fx_policy"],
+            ["yes", "FM Hub", "fm-hub", "sheet-1", "deck-1", "folder-1", "MXN", "USD", "banxico_monthly_average"],
+        ],
+    )
+
+    client = load_control_sheet_clients(object(), "control-sheet")[0]
+
+    assert client.source_currency == "MXN"
+    assert client.report_currency == "USD"
+    assert client.fx_policy == "banxico_monthly_average"
+
+
 def test_select_control_sheet_clients_filters_single_client():
     clients = [
         type("Client", (), {"client_key": "alpha"})(),

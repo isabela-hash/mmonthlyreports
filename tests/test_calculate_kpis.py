@@ -3,11 +3,13 @@ import pandas as pd
 import pytest
 from tools.calculate_kpis import (
     build_full_kpi_report,
+    calculate_detailed_top_meta_ads,
     calculate_funnel_kpis,
     calculate_funnel_top_ads,
     calculate_platform_kpis,
     calculate_total_funnel_distribution,
     calculate_top_ads,
+    calculate_top_ads_by_funnel_stage,
 )
 
 @pytest.fixture
@@ -75,6 +77,44 @@ def test_top_ads_include_source_link_for_ai_context():
 
     assert top[0]["source"] == "Ad 123456"
     assert top[0]["source_link"] == "TOF - Branded - Exact - US"
+
+
+def test_detailed_top_meta_ads_includes_videos_and_slide_metrics():
+    ads = pd.DataFrame(
+        [
+            {"Traffic Source": "meta", "Funnel": "TOF", "Cost": 10, "Total Revenue": 100, "Sales": 2, "Leads": 5, "Click": 20, "Impressions": 1000, "Source": "Video - Winner"},
+            {"Traffic Source": "meta", "Funnel": "MOF", "Cost": 20, "Total Revenue": 50, "Sales": 1, "Leads": 4, "Click": 10, "Impressions": 500, "Source": "Image - Runner Up"},
+            {"Traffic Source": "google", "Funnel": "BOF", "Cost": 1, "Total Revenue": 999, "Sales": 1, "Leads": 1, "Click": 1, "Impressions": 10, "Source": "Google Ad"},
+        ]
+    )
+
+    top = calculate_detailed_top_meta_ads(ads, n=2)
+
+    assert [row["source"] for row in top] == ["Video - Winner", "Image - Runner Up"]
+    assert top[0]["revenue_pct"] == 66.67
+    assert top[0]["roas"] == 10
+    assert top[0]["cps"] == 5
+    assert top[0]["cvr_pct"] == 10
+    assert top[0]["ctr_pct"] == 2
+
+
+def test_top_ads_by_funnel_stage_uses_all_channels_and_limits_to_three():
+    ads = pd.DataFrame(
+        [
+            {"Traffic Source": "google", "Funnel": "TOF", "Cost": 10, "Total Revenue": 300, "Sales": 3, "Leads": 4, "Click": 30, "Impressions": 1000, "Source": "Google TOF"},
+            {"Traffic Source": "meta", "Funnel": "TOF", "Cost": 10, "Total Revenue": 200, "Sales": 4, "Leads": 5, "Click": 20, "Impressions": 1000, "Source": "Meta TOF"},
+            {"Traffic Source": "bing", "Funnel": "TOF", "Cost": 10, "Total Revenue": 100, "Sales": 1, "Leads": 2, "Click": 10, "Impressions": 1000, "Source": "Bing TOF"},
+            {"Traffic Source": "meta", "Funnel": "TOF", "Cost": 10, "Total Revenue": 50, "Sales": 1, "Leads": 2, "Click": 10, "Impressions": 1000, "Source": "Fourth TOF"},
+            {"Traffic Source": "meta", "Funnel": "BOF", "Cost": 10, "Total Revenue": 500, "Sales": 5, "Leads": 6, "Click": 50, "Impressions": 1000, "Source": "Meta BOF"},
+        ]
+    )
+
+    top = calculate_top_ads_by_funnel_stage(ads, n=3)
+
+    assert [row["source"] for row in top["TOF"]] == ["Google TOF", "Meta TOF", "Bing TOF"]
+    assert top["TOF"][0]["traffic_source"] == "google"
+    assert top["BOF"][0]["source"] == "Meta BOF"
+    assert top["MOF"] == []
 
 
 def test_funnel_top_ads_selects_highest_revenue_ad_by_stage(sample_ads):
@@ -153,4 +193,6 @@ def test_full_kpi_report_keeps_aggregate_funnels_and_ad_card_rows(sample_campaig
     assert report["google_funnel_cards"]["MOF"]["revenue"] == 500
     assert report["meta_funnels"]["TOF"]["revenue"] == 160
     assert report["meta_funnel_cards"]["TOF"]["source"] == "Ad_C - Meta TOF"
+    assert report["meta_top_ads_detailed"][0]["source"] == "Ad_C - Meta TOF"
+    assert report["top_ads_by_funnel_stage"]["MOF"][0]["source"] == "Ad_A - Google MOF"
     assert report["total_funnel_distribution"]["TOF"]["cost"] == 180

@@ -43,7 +43,9 @@ Use one separate control sheet for orchestration across the 14 clients.
 
 - `Clients` tab:
   - Required columns: `active`, `client_name`, `client_key`, `spreadsheet_url_or_id`, `template_presentation_url_or_id`, `output_folder_id`
-  - Optional columns: `campaigns_tab`, `ads_tab`, `timezone`, `insights_provider`
+- Optional columns: `campaigns_tab`, `ads_tab`, `timezone`, `insights_provider`
+- Optional currency columns: `source_currency` (defaults to `USD`), `report_currency` (defaults to `USD`), and `fx_policy` (defaults to `none`).
+- For MXN source data displayed in USD, use `source_currency = MXN`, `report_currency = USD`, and `fx_policy = banxico_monthly_average`. The runner reads Banco de México's monthly average daily MXN-per-USD series and records the applied rate in the run log. `BANXICO_API_TOKEN` enables the API path; without it, the runner uses Banco de México's official public CSV export.
   - Use `insights_provider = auto` for active clients unless you are intentionally running a technical deterministic audit.
 - `Runs` tab:
   - Centralized log for one row per client execution with provider used, deck URL, and error summary.
@@ -143,6 +145,28 @@ Use the same image for both Cloud Run surfaces:
   - Launches the Cloud Run Job asynchronously through the Cloud Run Admin API
 
 Share the client Sheets, Slides templates, control sheet, and Drive output folders with the service account used by these workloads.
+
+## MT Ops Portal
+
+The internal portal is the technician-facing entrypoint for full report ops:
+
+- Dashboard: lists active and inactive clients with latest report links.
+- Client creation: creates the Drive folder, 2026 data Sheet, and master control row.
+- Activation: safely toggles clients between staged/inactive and active.
+- Preflight: checks current data, previous-period data, template audit, and latest report status.
+- Runs: queues one client, all active clients, or only missing reports through the Cloud Run Job.
+
+Supported run flags:
+
+```bash
+python3 tools/run_control_sheet_reports.py \
+  --run-mode missing \
+  --month May --year 2026 \
+  --allow-first-month-baseline \
+  --include-inactive
+```
+
+Use `--allow-first-month-baseline` only when the uploaded current-month data is complete but the client has no prior-month rows yet. The run is logged with a zero previous-period KPI baseline.
 
 Phase rollout:
 - Phase 1: use the Cloud Run service manually from the web page.

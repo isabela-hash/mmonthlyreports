@@ -21,8 +21,16 @@ from tools.control_sheet import (
     select_control_sheet_clients,
 )
 from tools.google_workspace import build_workspace_services, extract_file_id
+from tools.google_sheet_report_data import read_sheet_values
 from tools.report_periods import resolve_reporting_window
 from tools.run_google_slides_report import build_run_namespace, ensure_supported_python_version, run_report
+
+
+PRESENTATION_MIME = "application/vnd.google-apps.presentation"
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def parse_args() -> argparse.Namespace:
@@ -34,7 +42,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--clients-sheet", default=os.environ.get("CONTROL_SHEET_CLIENTS_SHEET", DEFAULT_CLIENTS_SHEET))
     parser.add_argument("--runs-sheet", default=os.environ.get("CONTROL_SHEET_RUNS_SHEET", DEFAULT_RUNS_SHEET))
-    parser.add_argument("--run-mode", choices=["all", "one"], default=os.environ.get("RUN_MODE", "all"))
+    parser.add_argument("--run-mode", choices=["all", "one", "missing"], default=os.environ.get("RUN_MODE", "all"))
     parser.add_argument("--client-key", default=os.environ.get("CLIENT_KEY", ""))
     parser.add_argument("--month", default=os.environ.get("REPORT_MONTH", ""))
     parser.add_argument("--year", type=int, default=int(os.environ["REPORT_YEAR"]) if os.environ.get("REPORT_YEAR") else None)
@@ -58,6 +66,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fail-fast", action="store_true", default=os.environ.get("FAIL_FAST", "").lower() == "true")
     parser.add_argument("--write-client-run-log", action="store_true")
     parser.add_argument("--write-client-kpi-output", action="store_true")
+    parser.add_argument(
+        "--allow-first-month-baseline",
+        action="store_true",
+        default=_env_flag("ALLOW_FIRST_MONTH_BASELINE"),
+    )
+    parser.add_argument("--include-inactive", action="store_true", default=_env_flag("INCLUDE_INACTIVE"))
     return parser.parse_args()
 
 
@@ -66,6 +80,70 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--control-sheet is required or MASTER_CONTROL_SHEET_ID/CONTROL_SHEET_ID must be set.")
     if args.run_mode == "one" and not args.client_key:
         raise ValueError("--client-key is required when --run-mode one is used.")
+
+
+def _escape_drive_query(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("'", "\\'")
+
+
+def _successful_run_keys(
+    sheets_service,
+    control_sheet_id: str,
+    runs_sheet: str,
+    month: str,
+    year: int,
+) -> set[str]:
+    values = read_sheet_values(sheets_service, control_sheet_id, runs_sheet, "A1:M")
+    if not values:
+        return set()
+    headers = [str(header).strip() for header in values[0]]
+    successful: set[str] = set()
+    wanted_period = f"{month} {year}"
+    for row in values[1:]:
+        padded = row + [""] * max(0, len(headers) - len(row))
+        item = dict(zip(headers, padded))
+        if (
+            str(item.get("period", "")).strip() == wanted_period
+            and str(item.get("status", "")).strip().lower() == "ok"
+            and str(item.get("presentation_url", "")).strip()
+        ):
+            successful.add(str(item.get("client_key", "")).strip().lower())
+    return successful
+
+
+def _drive_has_period_deck(drive_service, client, month: str, year: int) -> bool:
+    query = (
+        f"'{_escape_drive_query(client.output_folder_id)}' in parents "
+        f"and mimeType = '{PRESENTATION_MIME}' "
+        f"and trashed = false "
+        f"and name contains '{_escape_drive_query(f'{month} {year}')}'"
+    )
+    result = (
+        drive_service.files()
+        .list(q=query, fields="files(id)", pageSize=1)
+        .execute()
+    )
+    return bool(result.get("files", []))
+
+
+def select_missing_report_clients(
+    services: dict,
+    control_sheet_id: str,
+    runs_sheet: str,
+    clients: list,
+    month: str,
+    year: int,
+) -> list:
+    successful_keys = _successful_run_keys(services["sheets"], control_sheet_id, runs_sheet, month, year)
+    missing = []
+    for client in clients:
+        key = client.client_key.strip().lower()
+        if key in successful_keys:
+            continue
+        if _drive_has_period_deck(services["drive"], client, month, year):
+            continue
+        missing.append(client)
+    return missing
 
 
 def main() -> int:
@@ -87,9 +165,19 @@ def main() -> int:
         services["sheets"],
         control_sheet_id,
         sheet_name=args.clients_sheet,
-        active_only=True,
+        active_only=not args.include_inactive,
     )
-    selected_clients = select_control_sheet_clients(clients, args.run_mode, client_key=args.client_key)
+    if args.run_mode == "missing":
+        selected_clients = select_missing_report_clients(
+            services,
+            control_sheet_id,
+            args.runs_sheet,
+            clients,
+            window.month,
+            window.year,
+        )
+    else:
+        selected_clients = select_control_sheet_clients(clients, args.run_mode, client_key=args.client_key)
     batch_run_id = str(uuid.uuid4())
 
     summaries: list[dict] = []
@@ -109,9 +197,13 @@ def main() -> int:
             campaigns_sheet=client.campaigns_tab,
             ads_sheet=client.ads_tab,
             output_folder_id=client.output_folder_id,
+            source_currency=getattr(client, "source_currency", "USD"),
+            report_currency=getattr(client, "report_currency", "USD"),
+            fx_policy=getattr(client, "fx_policy", "none"),
             insights_provider=requested_provider,
             skip_run_log=not args.write_client_run_log,
             skip_kpi_output=not args.write_client_kpi_output,
+            allow_first_month_baseline=args.allow_first_month_baseline,
         )
         try:
             summary = run_report(client_args, services=services)
@@ -131,6 +223,8 @@ def main() -> int:
                     validation={
                         "remaining_placeholders": summary.get("remaining_placeholders", []),
                         "prev_period": summary.get("prev_period", ""),
+                        "first_month_baseline": summary.get("first_month_baseline", False),
+                        "fx": summary.get("fx", {}),
                     },
                 ),
                 sheet_name=args.runs_sheet,

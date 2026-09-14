@@ -19,6 +19,7 @@ REQUIRED_CLIENT_COLUMNS = {
 }
 DEFAULT_CLIENTS_SHEET = "Clients"
 DEFAULT_RUNS_SHEET = "Runs"
+CURRENCY_CLIENT_COLUMNS = ("source_currency", "report_currency", "fx_policy")
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,9 @@ class ControlSheetClient:
     ads_tab: str = "Ads"
     timezone: str = ""
     insights_provider: str = "auto"
+    source_currency: str = "USD"
+    report_currency: str = "USD"
+    fx_policy: str = "none"
 
 
 def _normalize_column(value: str) -> str:
@@ -42,6 +46,38 @@ def _normalize_column(value: str) -> str:
 def _parse_active(value: Any) -> bool:
     normalized = str(value).strip().lower()
     return normalized in {"1", "true", "yes", "y", "active"}
+
+
+def _column_a1(index: int) -> str:
+    letters = ""
+    value = index
+    while value:
+        value, remainder = divmod(value - 1, 26)
+        letters = chr(65 + remainder) + letters
+    return letters
+
+
+def ensure_control_sheet_currency_columns(
+    sheets_service,
+    spreadsheet_id: str,
+    sheet_name: str = DEFAULT_CLIENTS_SHEET,
+) -> list[str]:
+    """Append optional currency settings without altering existing client columns."""
+    headers = read_sheet_values(sheets_service, spreadsheet_id, sheet_name, "A1:Z1")
+    if not headers:
+        raise ValueError(f"Control sheet {sheet_name!r} has no header row.")
+    existing = {_normalize_column(value) for value in headers[0]}
+    missing = [column for column in CURRENCY_CLIENT_COLUMNS if column not in existing]
+    if not missing:
+        return []
+    start = _column_a1(len(headers[0]) + 1)
+    sheets_service.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f"{quote_sheet_name(sheet_name)}!{start}1",
+        valueInputOption="USER_ENTERED",
+        body={"values": [missing]},
+    ).execute()
+    return missing
 
 
 def _ensure_run_headers(sheets_service, spreadsheet_id: str, sheet_name: str, headers: list[str]) -> None:
@@ -84,6 +120,9 @@ def load_control_sheet_clients(
         insights_provider = (
             str(row.get(normalized.get("insights_provider", ""), "")).strip().lower() or "auto"
         )
+        source_currency = str(row.get(normalized.get("source_currency", ""), "")).strip().upper() or "USD"
+        report_currency = str(row.get(normalized.get("report_currency", ""), "")).strip().upper() or "USD"
+        fx_policy = str(row.get(normalized.get("fx_policy", ""), "")).strip().lower() or "none"
 
         client = ControlSheetClient(
             active=is_active,
@@ -98,6 +137,9 @@ def load_control_sheet_clients(
             ads_tab=ads_tab,
             timezone=timezone_value,
             insights_provider=insights_provider,
+            source_currency=source_currency,
+            report_currency=report_currency,
+            fx_policy=fx_policy,
         )
         if not client.client_key:
             raise ValueError(f"Client row for {client.client_name!r} is missing client_key.")

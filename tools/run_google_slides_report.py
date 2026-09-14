@@ -12,6 +12,13 @@ if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from tools.calculate_kpis import build_full_kpi_report
+from tools.currency_conversion import (
+    convert_dataframe_monetary_values,
+    convert_manual_money_values,
+    normalize_currency,
+    normalize_fx_policy,
+    resolve_fx_conversion,
+)
 from tools.generate_insights import INSIGHT_PROVIDER_CHOICES, generate_insights_with_provider
 from tools.google_sheet_report_data import (
     append_run_log,
@@ -26,6 +33,7 @@ from tools.google_slides_report import (
     copy_presentation,
     export_presentation,
     get_slide_thumbnail_urls,
+    insert_creative_metric_tables,
     read_placeholders,
     refresh_linked_sheets_charts,
     replace_placeholders,
@@ -34,11 +42,15 @@ from tools.google_workspace import build_workspace_services, extract_file_id
 from tools.report_periods import resolve_reporting_window
 from tools.report_insights import assert_insights_shape, build_fake_insights
 from tools.report_replacements import build_audit_replacements
-from tools.validate_data import validate_or_raise
+from tools.validate_data import canonicalize_traffic_sources, validate_or_raise
 
 PDF_MIME = "application/pdf"
 PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 MIN_SUPPORTED_PYTHON = (3, 11)
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def parse_args() -> argparse.Namespace:
@@ -71,6 +83,21 @@ def parse_args() -> argparse.Namespace:
         default=os.environ.get("REPORT_CURRENCY", "USD"),
         help="Currency symbol used for placeholder-backed money values and generated narratives.",
     )
+    parser.add_argument(
+        "--source-currency",
+        default=os.environ.get("REPORT_SOURCE_CURRENCY", ""),
+        help="Currency used by source Sheet money fields (USD or MXN).",
+    )
+    parser.add_argument(
+        "--report-currency",
+        default=os.environ.get("REPORT_CURRENCY", ""),
+        help="Currency shown in the completed report (USD, EUR, or MXN).",
+    )
+    parser.add_argument(
+        "--fx-policy",
+        default=os.environ.get("REPORT_FX_POLICY", "none"),
+        help="Currency conversion policy: none or banxico_monthly_average.",
+    )
     parser.add_argument("--media-buyer-notes", default="")
     parser.add_argument("--special-requests", default="")
     parser.add_argument(
@@ -84,6 +111,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-run-log", action="store_true")
     parser.add_argument("--skip-kpi-output", action="store_true")
     parser.add_argument("--skip-chart-refresh", action="store_true")
+    parser.add_argument(
+        "--allow-first-month-baseline",
+        action="store_true",
+        default=_env_flag("ALLOW_FIRST_MONTH_BASELINE"),
+        help="Allow generation when current-month data exists but the previous month is empty, using zero previous KPIs.",
+    )
     parser.add_argument("--thumbnail-audit", action="store_true", help="Print thumbnail URLs for quick visual checks.")
     parser.add_argument("--export-pdf-path", default="")
     parser.add_argument("--export-pptx-path", default="")
@@ -115,6 +148,9 @@ def build_run_namespace(**overrides) -> argparse.Namespace:
         "prev_ad_revenue": None,
         "prev_ad_cost": None,
         "currency": os.environ.get("REPORT_CURRENCY", "USD"),
+        "source_currency": os.environ.get("REPORT_SOURCE_CURRENCY", ""),
+        "report_currency": os.environ.get("REPORT_CURRENCY", ""),
+        "fx_policy": os.environ.get("REPORT_FX_POLICY", "none"),
         "media_buyer_notes": "",
         "special_requests": "",
         "insights_provider": os.environ.get("REPORT_INSIGHTS_PROVIDER", "auto"),
@@ -123,6 +159,7 @@ def build_run_namespace(**overrides) -> argparse.Namespace:
         "skip_run_log": False,
         "skip_kpi_output": False,
         "skip_chart_refresh": False,
+        "allow_first_month_baseline": _env_flag("ALLOW_FIRST_MONTH_BASELINE"),
         "thumbnail_audit": False,
         "export_pdf_path": "",
         "export_pptx_path": "",
@@ -150,9 +187,22 @@ def _manual_or_arg(
 
 
 def _resolve_currency(manual: dict, args: argparse.Namespace) -> str:
-    value = getattr(args, "currency", None) or manual.get("currency") or manual.get("Currency") or "USD"
-    normalized = str(value).strip().upper()
-    return normalized if normalized in {"USD", "EUR"} else "USD"
+    value = (
+        getattr(args, "report_currency", None)
+        or getattr(args, "currency", None)
+        or manual.get("currency")
+        or manual.get("Currency")
+        or "USD"
+    )
+    return normalize_currency(value)
+
+
+def _resolve_source_currency(args: argparse.Namespace, report_currency: str) -> str:
+    return normalize_currency(getattr(args, "source_currency", "") or report_currency)
+
+
+def _resolve_fx_policy(args: argparse.Namespace) -> str:
+    return normalize_fx_policy(getattr(args, "fx_policy", "none"))
 
 
 def ensure_supported_python_version() -> None:
@@ -205,6 +255,24 @@ def ensure_report_data_available(df, sheet_name: str, client: str, month: str, y
         )
 
 
+def _is_empty_frame(df) -> bool:
+    return bool(getattr(df, "empty", False)) if hasattr(df, "empty") else len(df) == 0
+
+
+def _empty_like(df):
+    return df.iloc[0:0].copy() if hasattr(df, "iloc") else []
+
+
+def _first_month_baseline_validation(prev_month: str, prev_year: int) -> dict:
+    return {
+        "first_month_baseline": True,
+        "message": (
+            f"No rows found for previous period {prev_month} {prev_year}; "
+            "using zero previous-period KPI baseline."
+        ),
+    }
+
+
 def run_report(args: argparse.Namespace, services: dict | None = None) -> dict:
     validate_runtime_inputs(args)
     window = resolve_reporting_window(
@@ -238,6 +306,23 @@ def run_report(args: argparse.Namespace, services: dict | None = None) -> dict:
         }
 
     spreadsheet_id = extract_file_id(args.spreadsheet)
+    report_currency = _resolve_currency({}, args)
+    source_currency = _resolve_source_currency(args, report_currency)
+    fx_policy = _resolve_fx_policy(args)
+    current_fx = resolve_fx_conversion(
+        source_currency,
+        report_currency,
+        fx_policy,
+        window.month,
+        window.year,
+    )
+    prev_fx = resolve_fx_conversion(
+        source_currency,
+        report_currency,
+        fx_policy,
+        window.prev_month,
+        window.prev_year,
+    )
 
     campaigns = load_report_sheet(
         services["sheets"],
@@ -255,6 +340,8 @@ def run_report(args: argparse.Namespace, services: dict | None = None) -> dict:
         month=window.month,
         year=window.year,
     )
+    campaigns = canonicalize_traffic_sources(convert_dataframe_monetary_values(campaigns, current_fx))
+    ads = canonicalize_traffic_sources(convert_dataframe_monetary_values(ads, current_fx))
     ensure_report_data_available(campaigns, args.campaigns_sheet, args.client, window.month, window.year)
     ensure_report_data_available(ads, args.ads_sheet, args.client, window.month, window.year)
     checkpoints = validate_or_raise(campaigns)
@@ -276,10 +363,35 @@ def run_report(args: argparse.Namespace, services: dict | None = None) -> dict:
         month=window.prev_month,
         year=window.prev_year,
     )
-    ensure_report_data_available(prev_campaigns, args.campaigns_sheet, args.client, window.prev_month, window.prev_year)
-    ensure_report_data_available(prev_ads, args.ads_sheet, args.client, window.prev_month, window.prev_year)
-    prev_checkpoints = validate_or_raise(prev_campaigns)
-    prev_kpis = build_full_kpi_report(prev_campaigns, prev_ads)
+    prev_campaigns = canonicalize_traffic_sources(convert_dataframe_monetary_values(prev_campaigns, prev_fx))
+    prev_ads = canonicalize_traffic_sources(convert_dataframe_monetary_values(prev_ads, prev_fx))
+    prev_campaigns_empty = _is_empty_frame(prev_campaigns)
+    prev_ads_empty = _is_empty_frame(prev_ads)
+    first_month_baseline = False
+    if prev_campaigns_empty or prev_ads_empty:
+        if getattr(args, "allow_first_month_baseline", False) and prev_campaigns_empty and prev_ads_empty:
+            first_month_baseline = True
+            prev_checkpoints = _first_month_baseline_validation(window.prev_month, window.prev_year)
+            prev_kpis = build_full_kpi_report(_empty_like(campaigns), _empty_like(ads))
+        else:
+            ensure_report_data_available(
+                prev_campaigns,
+                args.campaigns_sheet,
+                args.client,
+                window.prev_month,
+                window.prev_year,
+            )
+            ensure_report_data_available(
+                prev_ads,
+                args.ads_sheet,
+                args.client,
+                window.prev_month,
+                window.prev_year,
+            )
+            raise RuntimeError("Previous-period data validation failed unexpectedly.")
+    else:
+        prev_checkpoints = validate_or_raise(prev_campaigns)
+        prev_kpis = build_full_kpi_report(prev_campaigns, prev_ads)
 
     manual_inputs = read_manual_inputs(
         services["sheets"],
@@ -297,6 +409,8 @@ def run_report(args: argparse.Namespace, services: dict | None = None) -> dict:
         window.prev_month,
         window.prev_year,
     )
+    manual_inputs = convert_manual_money_values(manual_inputs, current_fx)
+    prev_manual_inputs = convert_manual_money_values(prev_manual_inputs, prev_fx)
     overrides = {
         "company_revenue": 0,
         "ad_revenue": _manual_or_arg(manual_inputs, args, "ad_revenue"),
@@ -315,7 +429,7 @@ def run_report(args: argparse.Namespace, services: dict | None = None) -> dict:
             manual_key="ad_cost",
         ),
     }
-    currency = _resolve_currency(manual_inputs, args)
+    currency = report_currency
     overrides["currency"] = currency
 
     if not args.skip_kpi_output:
@@ -378,6 +492,7 @@ def run_report(args: argparse.Namespace, services: dict | None = None) -> dict:
         folder_id=output_folder_id,
     )
     occurrences = replace_placeholders(services["slides"], copied["id"], replacements)
+    inserted_table_requests = insert_creative_metric_tables(services["slides"], copied["id"], kpis)
     refreshed_charts = 0 if args.skip_chart_refresh else refresh_linked_sheets_charts(services["slides"], copied["id"])
     remaining = sorted(read_placeholders(services["slides"], copied["id"]))
 
@@ -390,7 +505,7 @@ def run_report(args: argparse.Namespace, services: dict | None = None) -> dict:
 
     thumbnail_urls = []
     if args.thumbnail_audit:
-        thumbnail_urls = get_slide_thumbnail_urls(services["slides"], copied["id"], max_slides=12)
+        thumbnail_urls = get_slide_thumbnail_urls(services["slides"], copied["id"])
 
     status = "ok" if not remaining else "needs_review"
     if not args.skip_run_log:
@@ -412,6 +527,11 @@ def run_report(args: argparse.Namespace, services: dict | None = None) -> dict:
                     "requested_insights_provider": requested_provider,
                     "used_insights_provider": used_provider,
                     "prev_period": f"{window.prev_month} {window.prev_year}",
+                    "first_month_baseline": first_month_baseline,
+                    "fx": {
+                        "current": current_fx.as_dict() if current_fx else None,
+                        "previous": prev_fx.as_dict() if prev_fx else None,
+                    },
                 },
             ),
             sheet_name=args.run_log_sheet,
@@ -422,16 +542,24 @@ def run_report(args: argparse.Namespace, services: dict | None = None) -> dict:
         "client": args.client,
         "period": f"{window.month} {window.year}",
         "prev_period": f"{window.prev_month} {window.prev_year}",
+        "first_month_baseline": first_month_baseline,
         "presentation": copied,
         "spreadsheet_id": spreadsheet_id,
         "template_presentation_id": template_id,
         "replacement_occurrences": occurrences,
+        "inserted_table_requests": inserted_table_requests,
         "refreshed_linked_charts": refreshed_charts,
         "remaining_placeholders": remaining,
         "requested_insights_provider": requested_provider,
         "used_insights_provider": used_provider,
         "insights_mode": insights_mode,
         "currency": currency,
+        "source_currency": source_currency,
+        "fx_policy": fx_policy,
+        "fx": {
+            "current": current_fx.as_dict() if current_fx else None,
+            "previous": prev_fx.as_dict() if prev_fx else None,
+        },
         "template_audit": audit,
         "pdf_path": pdf_path,
         "pptx_path": pptx_path,

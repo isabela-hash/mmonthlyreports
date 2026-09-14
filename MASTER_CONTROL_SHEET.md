@@ -21,6 +21,9 @@ Tabs created:
 - `ads_tab`
 - `timezone`
 - `insights_provider`
+- `source_currency` (optional; defaults to `USD`)
+- `report_currency` (optional; defaults to `USD`)
+- `fx_policy` (optional; defaults to `none`; FM Hub uses `banxico_monthly_average`)
 
 Use `auto` for active clients so real runs use Anthropic/OpenAI narratives and fail clearly if no AI key is configured. Use `deterministic` only for explicit technical dry runs.
 
@@ -39,3 +42,6 @@ Use `auto` for active clients so real runs use Anthropic/OpenAI narratives and f
 - `used_insights_provider`
 - `error_summary`
 - `validation_json`
+
+Currency conversion metadata is stored inside `validation_json`, including the monthly
+MXN-per-USD average, reciprocal conversion rate, Banco de México series, and observation count.

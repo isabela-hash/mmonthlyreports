@@ -1,0 +1,46 @@
+.page{min-height:100vh;background:#f3f2ed;color:#172324;font-family:Arial,Helvetica,sans-serif;padding:0 24px 80px}
+.frame{max-width:1320px;margin:auto}
+.nav{height:76px;display:flex;align-items:center;justify-content:space-between;gap:16px;border-bottom:1px solid #d4d9d4}
+.back{font-size:14px;color:#172324;text-decoration:none;font-weight:700}
+.navLabel,.eyebrow,.sectionNo,.currency,.heroStat span,.toolbar label{font-size:11px;letter-spacing:.15em;font-weight:800}
+.navLabel{color:#6d7b75}
+.refresh{border:1px solid #a7b7ae;background:transparent;color:#294139;border-radius:100px;padding:10px 15px;cursor:pointer;min-height:40px;font-weight:700}
+.refresh:hover{background:#e5ebe5}.refresh:disabled{opacity:.6;cursor:wait}
+.hero{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:45px;align-items:end;padding:62px 0 52px}
+.eyebrow{color:#386a56;margin-bottom:22px}
+.hero h1{font-size:clamp(45px,6vw,86px);line-height:.97;letter-spacing:-.068em;max-width:870px;margin:0;font-weight:800}
+.hero h1 em{font-family:Georgia,serif;font-weight:400;color:#2d7657}
+.hero p{max-width:640px;color:#56645c;line-height:1.55;font-size:16px;margin:25px 0 0}
+.heroStat{background:#173d30;color:white;border-radius:14px;padding:23px 24px 21px;display:flex;flex-direction:column;gap:8px;min-height:150px;justify-content:center}
+.heroStat span{color:#acd2b5}.heroStat strong{font-size:50px;letter-spacing:-.065em;line-height:1}.heroStat small{font-size:12px;line-height:1.35;color:#c5d8cd}
+.error{margin:0 0 25px;background:#fff0ee;border:1px solid #dcaba3;padding:16px;border-radius:8px;color:#8d2820}
+.toolbar{display:flex;align-items:end;justify-content:space-between;gap:25px;padding:0 0 18px}
+.toolbar label{display:block;color:#697d70;margin-bottom:7px}
+.toolbar select{min-width:215px;border:1px solid #acbcb1;background:#fff;border-radius:7px;padding:10px 12px;color:#172324;font-weight:700}
+.sourceMeta{display:flex;flex-wrap:wrap;gap:16px;align-items:center;font-size:12px;color:#5a6b60;text-align:right}
+.sourceMeta a{color:#2a6b4d;font-weight:800;text-decoration:none}
+.tableCard{background:white;border:1px solid #d9e0d9;border-radius:14px;box-shadow:0 15px 40px #15342d0d;overflow:hidden}
+.tableIntro{display:flex;justify-content:space-between;align-items:end;gap:15px;padding:27px 30px 24px}
+.sectionNo{color:#39825c}.tableIntro h2,.notes h2{font-size:25px;letter-spacing:-.035em;margin:9px 0 0}
+.currency{color:#547564;border:1px solid #cad9cc;border-radius:99px;padding:8px 10px;white-space:nowrap}
+.tableScroll{overflow-x:auto}
+.tableCard table{width:100%;border-collapse:collapse;min-width:940px;font-variant-numeric:tabular-nums}
+.tableCard th,.tableCard td{text-align:right;padding:18px 17px;border-top:1px solid #e6ebe6;white-space:nowrap}
+.tableCard thead th{background:#eaf0ea;color:#577060;font-size:11px;text-transform:uppercase;letter-spacing:.07em;vertical-align:top;padding-top:15px;padding-bottom:14px}
+.tableCard thead th:first-child,.tableCard tbody th{text-align:left;padding-left:30px}
+.tableCard thead small{display:block;text-transform:none;letter-spacing:0;font-size:10px;font-weight:500;margin-top:4px;color:#71857b}
+.tableCard tbody th{font-size:14px;font-weight:700;min-width:215px;white-space:normal}
+.tableCard tbody td{font-size:14px;font-weight:650}
+.tableCard tbody th small{display:block;margin-left:31px;margin-top:5px;color:#8a968d;font-size:11px;font-weight:400}
+.regionIndex{display:inline-block;min-width:31px;font-size:10px;letter-spacing:.06em;color:#8aa08e}
+.tableCard tbody tr:hover:not(.total){background:#f8faf7}
+.tableCard .unassigned{background:#f8f3e8}.tableCard .unassigned:hover{background:#f5eddb!important}
+.tableCard .roas{color:#177249;font-weight:800}
+.tableCard .total{background:#173d30;color:white}.tableCard .total th,.tableCard .total td{border-color:#173d30;font-weight:800;padding-top:20px;padding-bottom:20px}
+.empty{padding:35px;margin:0;color:#65756c}
+.notes{display:grid;grid-template-columns:300px 1fr;gap:50px;padding:54px 4px 0}
+.notes h2{font-size:31px;line-height:1.07}
+.noteGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:28px}
+.noteGrid p{font-size:13px;line-height:1.55;color:#66756c;margin:0}.noteGrid strong{color:#223f2f}
+@media(max-width:850px){.hero{grid-template-columns:1fr;padding:45px 0 35px}.heroStat{max-width:280px}.notes{grid-template-columns:1fr;gap:22px}.noteGrid{grid-template-columns:1fr 1fr}.navLabel{display:none}}
+@media(max-width:600px){.page{padding:0 15px 50px}.nav{height:66px}.hero{gap:30px}.hero h1{font-size:50px}.hero p{font-size:14px}.toolbar{align-items:start;flex-direction:column}.sourceMeta{text-align:left}.tableIntro{padding:23px 20px}.tableIntro h2{font-size:21px}.currency{font-size:9px}.noteGrid{grid-template-columns:1fr}}

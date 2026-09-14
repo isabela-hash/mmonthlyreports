@@ -31,6 +31,8 @@ def test_main_continues_after_one_client_failure(monkeypatch, capsys):
             fail_fast=False,
             write_client_run_log=False,
             write_client_kpi_output=False,
+            allow_first_month_baseline=False,
+            include_inactive=False,
         ),
     )
     monkeypatch.setattr(
@@ -93,3 +95,28 @@ def test_main_continues_after_one_client_failure(monkeypatch, capsys):
     assert exit_code == 1
     assert '"failure_count": 1' in payload
     assert "template mismatch" in payload
+
+
+def test_select_missing_report_clients_skips_logged_and_drive_existing(monkeypatch):
+    clients = [
+        type("Client", (), {"client_key": "alpha", "output_folder_id": "folder-1"})(),
+        type("Client", (), {"client_key": "beta", "output_folder_id": "folder-2"})(),
+        type("Client", (), {"client_key": "gamma", "output_folder_id": "folder-3"})(),
+    ]
+    monkeypatch.setattr(batch_runner, "_successful_run_keys", lambda *args, **kwargs: {"alpha"})
+    monkeypatch.setattr(
+        batch_runner,
+        "_drive_has_period_deck",
+        lambda _drive, client, _month, _year: client.client_key == "beta",
+    )
+
+    selected = batch_runner.select_missing_report_clients(
+        {"sheets": object(), "drive": object()},
+        "control-sheet",
+        "Runs",
+        clients,
+        "May",
+        2026,
+    )
+
+    assert [client.client_key for client in selected] == ["gamma"]

@@ -98,6 +98,50 @@ def calculate_top_ads(df: pd.DataFrame, platform: str, n: int = 10) -> list:
     return results
 
 
+def _detailed_ad_row(row, revenue_total: float = 0.0) -> dict:
+    cost = float(row.get("Cost", 0) or 0)
+    revenue = float(row.get("Total Revenue", 0) or 0)
+    sales = float(row.get("Sales", 0) or 0)
+    leads = float(row.get("Leads", 0) or 0)
+    clicks = float(row.get("Click", 0) or 0)
+    impressions = float(row.get("Impressions", 0) or 0)
+    return {
+        "source": _clean_source_name(row),
+        "source_link": _clean_source_link(row),
+        "traffic_source": str(row.get("Traffic Source", "") or "").strip(),
+        "funnel": str(row.get("Funnel", "") or "").strip().upper(),
+        "cost": round(cost, 2),
+        "revenue": round(revenue, 2),
+        "revenue_pct": round(_safe_divide(revenue, revenue_total) * 100, 2),
+        "sales": round(sales, 0),
+        "clicks": round(clicks, 0),
+        "leads": round(leads, 0),
+        "impressions": round(impressions, 0),
+        "roas": round(_safe_divide(revenue, cost), 2),
+        "cps": round(_safe_divide(cost, sales), 2),
+        "cvr_pct": round(_safe_divide(sales, clicks) * 100, 2),
+        "ctr_pct": round(_safe_divide(clicks, impressions) * 100, 2),
+    }
+
+
+def calculate_detailed_top_meta_ads(df: pd.DataFrame, n: int = 10) -> list:
+    """Return top Meta ads by Total Revenue with slide-table metrics."""
+    p = df[df["Traffic Source"].str.lower() == "meta"].copy()
+    revenue_total = float(p["Total Revenue"].sum() or 0)
+    p = p.sort_values(["Total Revenue", "Sales"], ascending=[False, False]).head(n)
+    return [_detailed_ad_row(row, revenue_total) for _, row in p.iterrows()]
+
+
+def calculate_top_ads_by_funnel_stage(df: pd.DataFrame, n: int = 3) -> dict:
+    """Return top N ad rows by Total Revenue for each funnel stage across all channels."""
+    result = {}
+    for funnel in ["TOF", "MOF", "BOF"]:
+        f = df[df["Funnel"].str.upper() == funnel].copy()
+        f = f.sort_values(["Total Revenue", "Sales"], ascending=[False, False]).head(n)
+        result[funnel] = [_detailed_ad_row(row) for _, row in f.iterrows()]
+    return result
+
+
 def calculate_funnel_top_ads(df: pd.DataFrame, platform: str) -> dict:
     """Return the highest-revenue ad row for each funnel stage."""
     p = df[df["Traffic Source"].str.lower() == platform.lower()].copy()
@@ -192,6 +236,8 @@ def build_full_kpi_report(campaigns_df: pd.DataFrame, ads_df: pd.DataFrame) -> d
         "meta_funnel_cards":   calculate_funnel_top_ads(ads_df, "meta"),
         "google_top_ads": calculate_top_ads(ads_df, "google"),
         "meta_top_ads":   calculate_top_ads(ads_df, "meta"),
+        "meta_top_ads_detailed": calculate_detailed_top_meta_ads(ads_df),
+        "top_ads_by_funnel_stage": calculate_top_ads_by_funnel_stage(ads_df),
         "totals": {
             "cost":        total_cost,
             "revenue":     total_revenue,

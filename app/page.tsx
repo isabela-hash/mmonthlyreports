@@ -1,0 +1,10 @@
+import { redirect } from "next/navigation";
+import { isAuthenticated } from "@/lib/auth";
+import Portal from "./portal";
+
+export default async function HomePage() {
+  if (!(await isAuthenticated())) {
+    redirect("/login");
+  }
+  return <Portal />;
+}
