@@ -10,10 +10,14 @@ set -euo pipefail
 : "${BENCHMARK_GOOGLE_SECRET:?Set Secret Manager name for Google service-account JSON}"
 job_name="country-benchmarks"
 scheduler_name="country-benchmarks-monthly"
+env_vars="BENCHMARK_CONFIG_DRIVE_ID=$BENCHMARK_CONFIG_DRIVE_ID"
+for key in META_API_VERSION GOOGLE_ADS_API_VERSION GOOGLE_ADS_LOGIN_CUSTOMER_ID; do
+  if [[ -n "${!key:-}" ]]; then env_vars+=",$key=${!key}"; fi
+done
 gcloud run jobs deploy "$job_name" --project="$CLOUD_RUN_PROJECT" --region="$CLOUD_RUN_REGION" \
   --image="$BENCHMARK_IMAGE" --command=python --args=tools/run_country_benchmarks.py \
   --service-account="$BENCHMARK_SERVICE_ACCOUNT" --tasks=1 --parallelism=1 --max-retries=2 --task-timeout=3600s \
-  --set-env-vars="BENCHMARK_CONFIG_DRIVE_ID=$BENCHMARK_CONFIG_DRIVE_ID" \
+  --set-env-vars="$env_vars" \
   --set-secrets="BENCHMARK_PASSWORD_SEED=$BENCHMARK_SEED_SECRET:latest,GOOGLE_SERVICE_ACCOUNT_JSON=$BENCHMARK_GOOGLE_SECRET:latest${BENCHMARK_PLATFORM_SECRETS:+,$BENCHMARK_PLATFORM_SECRETS}"
 # The scheduler identity must already have roles/run.invoker on this job.
 operation=create
