@@ -185,7 +185,11 @@ def _run_subprocess(cmd: list[str]) -> dict[str, Any]:
     return {"status": "ok", "payload": payload}
 
 
+from tools.benchmarks.cli import dispatch as benchmark_dispatch
+
+
 COMMANDS = {
+    **{command: (lambda payload, command=command: benchmark_dispatch(command, payload)) for command in ("benchmark-list", "benchmark-access", "benchmark-read", "benchmark-passwords")},
     "dashboard": _dashboard,
     "alpha-geo-performance": _alpha_geo_performance,
     "create-client": _create_client,

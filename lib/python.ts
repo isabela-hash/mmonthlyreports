@@ -3,13 +3,13 @@ import path from "node:path";
 
 export type PythonResult<T = unknown> = T & { status?: string };
 
-const ROOT = process.cwd();
+const ROOT = path.join(/* turbopackIgnore: true */ process.cwd());
 const PYTHON = process.env.REPORT_PORTAL_PYTHON || "python3";
-const PYTHON_PACKAGES = repoPath(".python_packages");
+const PYTHON_PACKAGES = path.join(/* turbopackIgnore: true */ process.cwd(), ".python_packages");
 
 export function runReportOps<T = PythonResult>(command: string, payload: Record<string, unknown> = {}) {
   return new Promise<T>((resolve, reject) => {
-    const child = spawn(PYTHON, ["tools/report_ops_cli.py", command], {
+    const child = spawn(/* turbopackIgnore: true */ PYTHON, ["tools/report_ops_cli.py", command], {
       cwd: ROOT,
       env: {
         ...process.env,
@@ -17,6 +17,7 @@ export function runReportOps<T = PythonResult>(command: string, payload: Record<
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
+    const timer = setTimeout(() => { child.kill("SIGTERM"); reject(new Error("Report operation timed out")); }, command.startsWith("benchmark-") ? 55_000 : 600_000);
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => {
@@ -25,8 +26,9 @@ export function runReportOps<T = PythonResult>(command: string, payload: Record<
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString();
     });
-    child.on("error", reject);
+    child.on("error", (error) => { clearTimeout(timer); reject(error); });
     child.on("close", (code) => {
+      clearTimeout(timer);
       const raw = code === 0 ? stdout : stderr || stdout;
       let parsed: unknown;
       try {
@@ -46,8 +48,4 @@ export function runReportOps<T = PythonResult>(command: string, payload: Record<
     child.stdin.write(JSON.stringify(payload));
     child.stdin.end();
   });
-}
-
-export function repoPath(...parts: string[]) {
-  return path.join(ROOT, ...parts);
 }

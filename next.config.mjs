@@ -1,13 +1,16 @@
+import path from "node:path";
+
+const root = process.cwd();
+const runtimeFiles = [".python_packages/**/*", "tools/**/*", "workflows/**/*", "requirements.txt"].map(file => path.join(root, file));
+const privateFiles = ["data/**/*", "output/**/*", ".env*", "token*.pickle", "credentials.json", "*service-account*.json", ".venv/**/*", "tests/**/*", ".git/**/*"];
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
+  outputFileTracingExcludes: { "/**": privateFiles },
   outputFileTracingIncludes: {
-    "/api/**/*": [
-      "./.python_packages/**/*",
-      "./tools/**/*",
-      "./workflows/**/*",
-      "./requirements.txt",
-    ],
+    "/benchmarks": runtimeFiles,
+    "/api/**/*": runtimeFiles,
   },
 };
 

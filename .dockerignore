@@ -17,3 +17,8 @@ output
 *.pptx
 *.xlsx
 *.docx
+
+.venv
+.next
+.python_packages
+*service-account*.json

@@ -11,11 +11,11 @@ test("development fallback works locally, production requires configured credent
   try {
     delete process.env.PORTAL_PASSWORD;
     delete process.env.PORTAL_SESSION_SECRET;
-    process.env.NODE_ENV = "development";
+    Object.assign(process.env, { NODE_ENV: "development" });
     assert.equal(validatePassword("changeme"), true);
     assert.equal(verifySessionToken(createSessionToken()), true);
 
-    process.env.NODE_ENV = "production";
+    Object.assign(process.env, { NODE_ENV: "production" });
     assert.equal(validatePassword("changeme"), false);
     assert.equal(verifySessionToken("invalid.token"), false);
     assert.throws(createSessionToken, /PORTAL_SESSION_SECRET/);

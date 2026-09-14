@@ -43,12 +43,14 @@ jobs:
         run: python -m pytest -q
 
       - name: Compile scripts
-        run: python -m py_compile tools/*.py
+        run: python -m py_compile tools/*.py tools/benchmarks/*.py
 
       - name: Verify CLI help
         run: |
           python tools/run_google_slides_report.py --help
           python tools/run_control_sheet_reports.py --help
+          python tools/run_country_benchmarks.py --help
+          bash -n tools/setup_country_benchmark_schedule.sh
 
   web:
     runs-on: ubuntu-latest
@@ -74,6 +76,9 @@ jobs:
 
       - name: Build portal
         run: npx next build
+
+      - name: Verify private files are excluded
+        run: python tools/check_benchmark_bundle.py
 
   docker-build:
     runs-on: ubuntu-latest

@@ -140,7 +140,7 @@ export default function Portal() {
           <p>{dashboard ? `${dashboard.period} reports, comparing ${dashboard.prev_period}` : "Loading dashboard..."}</p>
         </div>
         <div className="topbar-actions">
-          <Link href="/alpha-funded/geo-performance">Alpha Funded geo check ↗</Link>
+          <Link href="/benchmarks">Country benchmarks ↗</Link>
           <button className="ghost-button" type="button" onClick={() => void logout()}>Log out</button>
         </div>
       </header>
